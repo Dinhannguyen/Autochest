@@ -1,0 +1,79 @@
+--- tele đến spawn boss
+local TweenService = game:GetService("TweenService")
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local player = Players.LocalPlayer
+local targetPos = Vector3.new(3777.76, 15.28, -3499.43)
+local teleporting = false
+
+function hasFistOfDarkness()
+    local backpack = player:FindFirstChild("Backpack")
+    local character = player.Character
+    if backpack and (backpack:FindFirstChild("Fist Of Darkness") or backpack:FindFirstChild("Fist of Darkness")) then
+        return true
+    end
+    if character and (character:FindFirstChild("Fist Of Darkness") or character:FindFirstChild("Fist of Darkness")) then
+        return true
+    end
+    return false
+end
+
+function NoClipCharacter()
+    for _, v in pairs(player.Character:GetDescendants()) do
+        if v:IsA("BasePart") then
+            v.CanCollide = false
+        end
+    end
+end
+
+function LockCamera()
+    local cam = workspace.CurrentCamera
+    cam.CameraType = Enum.CameraType.Scriptable
+    cam.CFrame = CFrame.new(player.Character.HumanoidRootPart.Position, targetPos)
+end
+
+function UnlockCamera()
+    workspace.CurrentCamera.CameraType = Enum.CameraType.Custom
+end
+
+function TweenToTarget()
+    if not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then return end
+    teleporting = true
+    local hrp = player.Character.HumanoidRootPart
+    local cf = CFrame.new(targetPos)
+    local distance = (hrp.Position - targetPos).Magnitude
+    local tweenInfo = TweenInfo.new(distance / 100, Enum.EasingStyle.Linear)
+    local tween = TweenService:Create(hrp, tweenInfo, {CFrame = cf})
+    tween:Play()
+    -- NoClip and lock camera during tween
+    local conn1
+    conn1 = RunService.Stepped:Connect(function()
+        if teleporting then
+            NoClipCharacter()
+            LockCamera()
+            -- Giữ nhân vật đứng yên
+            if player.Character:FindFirstChild("Humanoid") then
+                player.Character.Humanoid:ChangeState(11)
+            end
+        end
+    end)
+    tween.Completed:Wait()
+    teleporting = false
+    if conn1 then conn1:Disconnect() end
+    UnlockCamera()
+end
+
+spawn(function()
+    while true do
+        if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+            if hasFistOfDarkness() and not teleporting then
+                wait(5) -- Đợi 5 giây trước khi teleport
+                -- Kiểm tra lại điều kiện sau khi đợi
+                if hasFistOfDarkness() and not teleporting then
+                    TweenToTarget()
+                end
+            end
+        end
+        wait(0.2)
+    end
+end)
