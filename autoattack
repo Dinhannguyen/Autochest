@@ -1,0 +1,50 @@
+-- Auto Attack liên tục
+local player = game.Players.LocalPlayer
+
+local function IsAlive(character)
+    return character and character:FindFirstChild("Humanoid") and character.Humanoid.Health > 0
+end
+
+local function GetNearestEnemy()
+    local enemies = workspace:FindFirstChild("Enemies")
+    if not enemies then return nil end
+    local myPos = player.Character and player.Character:FindFirstChild("HumanoidRootPart") and player.Character.HumanoidRootPart.Position
+    if not myPos then return nil end
+    local nearest, minDist = nil, math.huge
+    for _, mob in pairs(enemies:GetChildren()) do
+        local hrp = mob:FindFirstChild("HumanoidRootPart")
+        if hrp and IsAlive(mob) then
+            local dist = (hrp.Position - myPos).Magnitude
+            if dist < minDist then
+                minDist = dist
+                nearest = mob
+            end
+        end
+    end
+    return nearest
+end
+
+local function AutoAttack()
+    while true do
+        local mob = GetNearestEnemy()
+        if mob then
+            local tool = player.Character and player.Character:FindFirstChildOfClass("Tool")
+            if tool and tool:FindFirstChild("LeftClickRemote") then
+                pcall(function()
+                    tool.LeftClickRemote:FireServer((mob.HumanoidRootPart.Position - player.Character.HumanoidRootPart.Position).Unit, 1)
+                end)
+            else
+                -- Nếu không phải vũ khí có LeftClickRemote, dùng event mặc định
+                local storage = game:GetService("ReplicatedStorage")
+                local attackEvent = storage:WaitForChild("Modules"):WaitForChild("Net"):WaitForChild("RE/RegisterAttack")
+                local hitEvent = storage:WaitForChild("Modules"):WaitForChild("Net"):WaitForChild("RE/RegisterHit")
+                local targets = { {mob, mob:FindFirstChild("Head") or mob:FindFirstChild("HumanoidRootPart")} }
+                attackEvent:FireServer(0)
+                hitEvent:FireServer(mob:FindFirstChild("HumanoidRootPart") or mob:FindFirstChild("Head"), targets)
+            end
+        end
+        task.wait(0) -- Không delay
+    end
+end
+
+spawn(AutoAttack)
