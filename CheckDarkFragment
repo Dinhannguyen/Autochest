@@ -1,0 +1,210 @@
+-- Discord Webhook 
+local WEBHOOK_URL = "https://discord.com/api/webhooks/1434766527479152745/I3KUOvoCUNtp9zItBDxuG20ZnaFdUeBzftBg_3DHoTSEKRda9EI48vL4xApT0e9fcjR-"
+local AVATAR_URL = "https://cdn.discordapp.com/attachments/1433496764425703424/1434907067662991474/FB_IMG_1760762564286.jpg?ex=690a08d8&is=6908b758&hm=4a6638a1852db8ab88787b30804787cf03b450bbe7f988b4b04f83847441a60b&"
+local BOT_NAME = "PHÚC"
+local CHECK_INTERVAL = 10 -- giây giữa mỗi lần check
+
+local HttpService = game:GetService("HttpService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local TeleportService = game:GetService("TeleportService")
+local player = Players.LocalPlayer
+
+if not player then
+    warn("Script cần chạy sau khi LocalPlayer tồn tại.")
+    return
+end
+
+local function getRequestFunc()
+    if syn and syn.request then return syn.request end
+    if http and http.request then return http.request end
+    if request then return request end
+    if http_request then return http_request end
+    if fluxus and fluxus.request then return fluxus.request end
+    return nil
+end
+
+local requestFunc = getRequestFunc()
+
+local function sendEmbedWebhook(title, description, fields)
+    if not WEBHOOK_URL or WEBHOOK_URL == "" then
+        warn("WEBHOOK_URL chưa được cấu hình.")
+        return false, "No webhook"
+    end
+
+    local embed = {
+        title = title,
+        description = description,
+        color = 3066993,
+        fields = fields or {},
+        timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+    }
+
+    local payload = {
+        username = BOT_NAME,
+        avatar_url = AVATAR_URL,
+        embeds = { embed }
+    }
+
+    local body = HttpService:JSONEncode(payload)
+
+    if requestFunc then
+        local ok, res = pcall(function()
+            return requestFunc({
+                Url = WEBHOOK_URL,
+                Method = "POST",
+                Headers = {["Content-Type"] = "application/json"},
+                Body = body
+            })
+        end)
+        return ok, res
+    else
+        local ok, err = pcall(function()
+            HttpService:PostAsync(WEBHOOK_URL, body, Enum.HttpContentType.ApplicationJson)
+        end)
+        return ok, err
+    end
+end
+
+local function getInventory()
+    local ok, res = pcall(function()
+        return ReplicatedStorage.Remotes.CommF_:InvokeServer("getInventory")
+    end)
+    if ok and typeof(res) == "table" then
+        return res
+    else
+        warn("Không lấy được inventory:", res)
+        return nil
+    end
+end
+
+local function countDarkFragments(inv)
+    if not inv then return 0 end
+    local cnt = 0
+    for _, item in ipairs(inv) do
+        local name = item.Name or item.name or ""
+        if name and string.lower(tostring(name)) == "dark fragment" then
+            local c = item.Count or item.count or item.Amount or item.amount or item.Quantity or item.quantity or 1
+            c = tonumber(c) or 1
+            cnt = cnt + c
+        end
+    end
+    return cnt
+end
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.KeyCode == Enum.KeyCode.M then
+        local inv = getInventory()
+        local cur = countDarkFragments(inv)
+        local fields = {
+            { name = "Player", value = tostring(player.Name), inline = true },
+            { name = "UserId", value = tostring(player.UserId or 0), inline = true },
+            { name = "Số lượng Dark Fragment", value = tostring(cur), inline = true }
+        }
+        local title = "💠 Dark Fragment Info (Manual)"
+        local description = string.format("Người chơi **%s** vừa bấm phím M để gửi thông tin.", player.Name)
+        local ok, res = pcall(sendEmbedWebhook, title, description, fields)
+        if ok then
+            print(string.format("[PHÚC] Đã gửi webhook thủ công (M) — tổng %d", cur))
+        else
+            warn("[PHÚC] Gửi webhook thất bại (M):", res)
+        end
+    end
+end)
+
+local function hopServer()
+    local maxRetry = 100
+    local retry = 0
+    local success = false
+    local gameId = tostring(game.PlaceId)
+    local servers = {}
+
+    while retry < maxRetry and not success do
+        retry = retry + 1
+        print(string.format("[PHÚC] Đang thử hop server lần %d...", retry))
+        local ok, res = pcall(function()
+            local url = string.format("https://games.roblox.com/v1/games/%s/servers/Public?sortOrder=Asc&limit=100", gameId)
+            local response = game:HttpGet(url)
+            return HttpService:JSONDecode(response)
+        end)
+        if ok and res and res.data then
+            servers = {}
+            for _, server in ipairs(res.data) do
+                if server.playing < server.maxPlayers and server.id ~= game.JobId then
+                    table.insert(servers, server.id)
+                end
+            end
+            if #servers > 0 then
+                local chosen = servers[math.random(1, #servers)]
+                print("[PHÚC] Đang hop tới server:", chosen)
+                local teleOk, teleErr = pcall(function()
+                    TeleportService:TeleportToPlaceInstance(game.PlaceId, chosen, player)
+                end)
+                if teleOk then
+                    success = true
+                    break
+                else
+                    print("[PHÚC] Teleport lỗi:", teleErr)
+                end
+            end
+        end
+        task.wait(1)
+    end
+
+    if not success then
+        print("[PHÚC] Hop server thất bại sau 100 lần, kick nhân vật!")
+        player:Kick("Không thể hop server sau 100 lần thử!")
+    end
+end
+
+local lastCount = nil
+
+while true do
+    local inv = getInventory()
+    local cur = countDarkFragments(inv)
+
+    if lastCount == nil then
+        lastCount = cur
+        print(string.format("[PHÚC] Khởi tạo Dark Fragment = %d", cur))
+    else
+        if cur > lastCount then
+            local delta = cur - lastCount
+
+            local fields = {
+                { name = "Player", value = tostring(player.Name), inline = true },
+                { name = "UserId", value = tostring(player.UserId or 0), inline = true },
+                { name = "Trước", value = tostring(lastCount), inline = true },
+                { name = "Hiện tại", value = tostring(cur), inline = true },
+                { name = "Tăng", value = string.format("+%d", delta), inline = true }
+            }
+
+            local title = "💠 Dark Fragment Increased"
+            local description = string.format("Phát hiện tăng Dark Fragment cho **%s**", player.Name)
+
+            local ok, res = pcall(sendEmbedWebhook, title, description, fields)
+            if ok then
+                print(string.format("[PHÚC] Đã gửi webhook — tăng +%d (tổng %d)", delta, cur))
+            else
+                warn("[PHÚC] Gửi webhook thất bại:", res)
+            end
+
+            lastCount = cur
+            task.wait(3)
+
+            -- Đếm ngược 5s rồi hop server
+            for i = 5, 1, -1 do
+                print(string.format("[PHÚC] Đếm ngược hop server: %d giây...", i))
+                task.wait(1)
+            end
+
+            hopServer()
+        elseif cur < lastCount then
+            print(string.format("[PHÚC] Dark Fragment giảm: %d -> %d", lastCount, cur))
+            lastCount = cur
+        end
+    end
+
+    task.wait(CHECK_INTERVAL)
+end
